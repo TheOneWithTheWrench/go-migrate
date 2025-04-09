@@ -7,16 +7,18 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"time"
 
 	_ "github.com/lib/pq" // PostgreSQL driver
 )
 
-const migrationTableQuery = `CREATE TABLE IF NOT EXISTS migrations (
-    migration_name  VARCHAR(255) NOT NULL,
-    migration_hash  VARCHAR(64),           
-    is_applied      BOOLEAN DEFAULT FALSE, 
-    primary key (migration_name)
-)`
+//go:embed migration_table_query.sql
+var migrationTableQuery string
+
+var (
+	ErrMigrationFileChanged = fmt.Errorf("migration file has changed")
+	ErrMigrationFailed      = fmt.Errorf("migration failed")
+)
 
 type migrationRow struct {
 	MigrationName string `json:"migration_name,omitempty"`
@@ -24,17 +26,38 @@ type migrationRow struct {
 	IsApplied     bool   `json:"is_applied,omitempty"`
 }
 
-func Migrate(db *sql.DB, migrations embed.FS) error {
-	var (
-		ctx = context.Background() //TODO: Should probably have an optional timeout
-	)
-	conn, err := db.Conn(ctx)
+type Migrator struct {
+	options    *options
+	db         *sql.DB
+	migrations embed.FS
+}
+
+func NewMigrator(db *sql.DB, migrations embed.FS, opts ...func(*options)) *Migrator {
+	opt := &options{
+		migrationTimeout: 10 * time.Second,
+	}
+	for _, o := range opts {
+		o(opt)
+	}
+
+	return &Migrator{
+		options:    opt,
+		db:         db,
+		migrations: migrations,
+	}
+}
+
+func (m *Migrator) Migrate() error {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), m.options.migrationTimeout)
+	defer cancel()
+
+	conn, err := m.db.Conn(timeoutCtx)
 	if err != nil {
 		return fmt.Errorf("get connection: %w", err)
 	}
 	defer conn.Close()
 
-	tx, err := conn.BeginTx(ctx, nil)
+	tx, err := conn.BeginTx(timeoutCtx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
@@ -45,14 +68,16 @@ func Migrate(db *sql.DB, migrations embed.FS) error {
 		return fmt.Errorf("create migrations table: %w", err)
 	}
 
-	err = fs.WalkDir(migrations, ".", checkIfMigrationsAreAltered(tx, migrations))
+	// We check if any of the migration files have been altered.
+	// It is currently undefined what to do if so
+	err = fs.WalkDir(m.migrations, ".", checkIfMigrationsAreAltered(tx, m.migrations))
 	if err != nil {
-		return fmt.Errorf("validate migrations: %w", err)
+		return ErrMigrationFileChanged
 	}
 
 	// We "walk" the migrations directory and execute each migration file
 	// if they are not already applied.
-	err = fs.WalkDir(migrations, ".", handleMigration(tx, migrations))
+	err = fs.WalkDir(m.migrations, ".", handleMigration(tx, m.migrations))
 	if err != nil {
 		return fmt.Errorf("walk migrations: %w", err)
 	}
@@ -131,7 +156,7 @@ func handleMigration(tx *sql.Tx, migrations embed.FS) fs.WalkDirFunc {
 
 		_, err = tx.Exec(string(readBytes))
 		if err != nil {
-			return fmt.Errorf("execute migration %q: %w", dirEntry.Name(), err)
+			return fmt.Errorf("execute migration %q: %w: %w", dirEntry.Name(), err, ErrMigrationFailed)
 		}
 
 		err = upsertMigration(tx, migrationRow{

@@ -3,22 +3,21 @@ package migrate
 import (
 	"database/sql"
 	"fmt"
-	"strings"
-	"time"
+
+	"github.com/google/uuid"
 )
 
 type TestingT interface {
 	Logf(format string, args ...any)
 	FailNow()
 	Cleanup(fn func())
-	Name() string
 }
 
 func SetupTestDatabase(t TestingT) *sql.DB {
 	var (
-		unixTime = time.Now().Unix()
-		schema   = strings.ReplaceAll(fmt.Sprintf("test_%s_%d", t.Name(), unixTime), "/", "_")
-		connUrl  = "postgres://testuser:testpassword@localhost:5432/testapp_db?sslmode=disable"
+		id      = uuid.NewString()[0:8]
+		schema  = fmt.Sprintf("test_%s", id)
+		connUrl = "postgres://testuser:testpassword@localhost:5432/testapp_db?sslmode=disable"
 	)
 
 	conn, err := sql.Open("postgres", connUrl)
