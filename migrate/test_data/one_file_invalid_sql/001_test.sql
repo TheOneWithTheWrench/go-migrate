@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS test (
+    id INT PRIARY KEY, --Typo
+    name VARCHAR(100)
+);

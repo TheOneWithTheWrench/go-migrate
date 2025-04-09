@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS test (
+    id VARCHAR(100) PRIMARY KEY,
+    name VARCHAR(100)
+);
