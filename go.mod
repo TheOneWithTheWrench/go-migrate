@@ -1,4 +1,4 @@
-module migrate
+module github.com/theonewiththewrench/go-migrate
 
 go 1.24.2
 

@@ -3,11 +3,12 @@ package migrate_test
 import (
 	"database/sql"
 	"embed"
-	"migrate/migrate"
-	"migrate/migrate/test_data"
+
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/theonewiththewrench/go-migrate"
+	"github.com/theonewiththewrench/go-migrate/test_data"
 )
 
 //go:embed test_data/two_files_no_error/*.sql
