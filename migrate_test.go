@@ -53,6 +53,10 @@ func TestMigrate(t *testing.T) {
 			migrations, err := repo.GetAllMigrations()
 			assert.NoError(t, err)
 			assert.Len(t, migrations, 2)
+			for _, migration := range migrations {
+				assert.True(t, migration.IsApplied)
+				assert.False(t, migration.IsDirty)
+			}
 		})
 
 		t.Run("can call migrate multiple times", func(t *testing.T) {
@@ -83,7 +87,8 @@ func TestMigrate(t *testing.T) {
 		t.Run("should error when migration has invalid sql", func(t *testing.T) {
 			// Arrange
 			var (
-				db = migrate.SetupTestDatabase(t)
+				db   = migrate.SetupTestDatabase(t)
+				repo = newRepo(db)
 			)
 
 			// Act
@@ -92,6 +97,27 @@ func TestMigrate(t *testing.T) {
 			// Assert
 			assert.Error(t, err)
 			assert.ErrorIs(t, err, migrate.ErrMigrationFailed)
+			migrations, err := repo.GetAllMigrations()
+			assert.NoError(t, err)
+			assert.Len(t, migrations, 1)
+			assert.False(t, migrations[0].IsApplied)
+			assert.True(t, migrations[0].IsDirty)
+		})
+
+		t.Run("should error when dirty migration exists", func(t *testing.T) {
+			// Arrange
+			var (
+				db = migrate.SetupTestDatabase(t)
+			)
+
+			_ = sut(db, invalidMigration)
+
+			// Act
+			err := sut(db, invalidMigration)
+
+			// Assert
+			assert.Error(t, err)
+			assert.ErrorIs(t, err, migrate.ErrDirtyMigration)
 		})
 	})
 }

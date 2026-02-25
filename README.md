@@ -5,8 +5,8 @@ A simple Go library for managing database schema migrations using embedded SQL f
 ## Features
 
 * **Embed Migrations:** Uses Go's `//go:embed` directive to bundle SQL migration files directly into your application binary.
-* **Transactional:** Applies all pending migrations within a single database transaction. If any migration fails, the entire process is rolled back.
-* **State Tracking:** Creates and maintains a `migrations` table in your database to track which migrations have been applied.
+* **Non-Transactional:** Runs each migration without a global transaction, allowing statements that cannot run inside a transaction.
+* **State Tracking:** Creates and maintains a `migrations` table in your database to track which migrations have been applied and whether a migration is dirty.
 * **Integrity Check:** Calculates a SHA256 hash of each migration file upon application. Before applying new migrations, it verifies that previously applied migrations haven't been altered by comparing stored hashes with current file hashes.
 * **Idempotent:** Ensures migrations are only applied once.
 * **Configurable Timeout:** Includes a configurable timeout for the migration process (defaults to 10 seconds).
@@ -71,9 +71,11 @@ go get github.com/TheOneWithTheWrench/go-migrate
         err := migrator.Migrate()
         if err != nil {
             // Check for specific migration errors if needed
-            if err == migrate.ErrMigrationFileChanged {
-                 log.Fatalf("CRITICAL: Migration failed because a previously applied migration file has been modified. Manual intervention required.")
-            } else {
+             if err == migrate.ErrMigrationFileChanged {
+                  log.Fatalf("CRITICAL: Migration failed because a previously applied migration file has been modified. Manual intervention required.")
+             } else if err == migrate.ErrDirtyMigration {
+                  log.Fatalf("CRITICAL: Migration failed because a previous migration is marked dirty. Manual intervention required.")
+             } else {
                  // Handle generic migration errors (connection, SQL syntax, permissions etc.)
                  log.Fatalf("Migration failed: %v", err)
             }
@@ -100,14 +102,16 @@ The `NewMigrator` function uses the functional options pattern for configuration
 ## How it Works
 
 1.  **Initialization:** The `Migrator` is created with a database connection (`*sql.DB`), an embedded filesystem (`embed.FS`), and any configured options.
-2.  **Transaction Start:** The `Migrate()` method starts a database transaction with a context governed by the configured `migrationTimeout`.
+2.  **Execution Context:** The `Migrate()` method opens a database connection with a context governed by the configured `migrationTimeout`.
 3.  **Migration Table:** It ensures a `migrations` table exists (using the embedded `migration_table_query.sql`). This table stores the name, hash, and applied status of each migration.
-4.  **Integrity Check:** It fetches the records of already applied migrations from the `migrations` table. It then walks the embedded filesystem, comparing the hash of any file found in the table with its stored hash. If a mismatch occurs, it returns `ErrMigrationFileChanged`.
-5.  **Apply Pending Migrations:** It walks the embedded filesystem again. For each file:
+4.  **Dirty Check:** It fails fast with `ErrDirtyMigration` if any migration is already marked dirty.
+5.  **Integrity Check:** It fetches the records of already applied migrations from the `migrations` table. It then walks the embedded filesystem, comparing the hash of any applied file found in the table with its stored hash. If a mismatch occurs, it returns `ErrMigrationFileChanged`.
+6.  **Apply Pending Migrations:** It walks the embedded filesystem again. For each file:
     * If the file is not listed in the `migrations` table or is marked as not applied (`is_applied=false`), its SQL content is executed.
-    * Upon successful execution, the file's SHA256 hash is calculated, and an entry (or update) is made in the `migrations` table with the filename, hash, and `is_applied=true`.
-    * If execution fails, the process stops, returning an error wrapping `ErrMigrationFailed`.
-6.  **Commit/Rollback:** If all migrations are applied successfully and integrity checks pass within the timeout period, the transaction is committed. Otherwise, it's rolled back (either due to an error or timeout).
+    * Before execution, the migration is marked dirty (`is_dirty=true`) and the file's SHA256 hash is stored.
+    * Upon successful execution, the migration is marked applied (`is_applied=true`) and cleared (`is_dirty=false`).
+    * If execution fails, the process stops, returning an error wrapping `ErrMigrationFailed` and leaving the migration dirty.
+7.  **Completion:** If all migrations are applied successfully and integrity checks pass within the timeout period, `Migrate()` returns nil.
 
 ## Current Limitations
 

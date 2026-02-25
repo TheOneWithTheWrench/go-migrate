@@ -8,6 +8,7 @@ type migrationRow struct {
 	MigrationName string `json:"migration_name,omitempty"`
 	MigrationHash string `json:"migration_hash,omitempty"`
 	IsApplied     bool   `json:"is_applied,omitempty"`
+	IsDirty       bool   `json:"is_dirty,omitempty"`
 }
 
 type TestRepo struct {
@@ -22,7 +23,7 @@ func NewRepo(db *sql.DB) *TestRepo {
 
 func (r *TestRepo) GetMigrationByName(name string) migrationRow {
 	var row migrationRow
-	err := r.db.QueryRow("SELECT migration_name, migration_hash, is_applied FROM migrations WHERE migration_name = ?", name).Scan(&row.MigrationName, &row.MigrationHash, &row.IsApplied)
+	err := r.db.QueryRow("SELECT migration_name, migration_hash, is_applied, is_dirty FROM migrations WHERE migration_name = $1", name).Scan(&row.MigrationName, &row.MigrationHash, &row.IsApplied, &row.IsDirty)
 	if err != nil {
 		return migrationRow{}
 	}
@@ -30,7 +31,7 @@ func (r *TestRepo) GetMigrationByName(name string) migrationRow {
 }
 
 func (r *TestRepo) GetAllMigrations() ([]migrationRow, error) {
-	rows, err := r.db.Query("SELECT migration_name, migration_hash, is_applied FROM migrations")
+	rows, err := r.db.Query("SELECT migration_name, migration_hash, is_applied, is_dirty FROM migrations")
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +40,7 @@ func (r *TestRepo) GetAllMigrations() ([]migrationRow, error) {
 	var migrations []migrationRow
 	for rows.Next() {
 		var row migrationRow
-		if err := rows.Scan(&row.MigrationName, &row.MigrationHash, &row.IsApplied); err != nil {
+		if err := rows.Scan(&row.MigrationName, &row.MigrationHash, &row.IsApplied, &row.IsDirty); err != nil {
 			return nil, err
 		}
 		migrations = append(migrations, row)
